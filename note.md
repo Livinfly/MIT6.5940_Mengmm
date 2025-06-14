@@ -1,4 +1,4 @@
-# Lec01 引入
+Lec01 引入
 
 
 
@@ -1343,4 +1343,1118 @@ let's think step by step
 ### ReTrieval Augmented Generation (RAG)
 
 # Lec15 Long-Context LLM
+
+## Context Extension
+
+### PoPE
+
+增加频率，扩展上下文，然后还需要去微调 Fine-tune
+
+### LongLoRA
+
+性能瓶颈：注意力机制。二次增长
+
+偏移稀疏注意力，不同模式，作为一个注意力头
+
+怎么Fine-Tune embedding 和 normalization 层的？
+
+两个模式都用，比单用一个模式好。
+
+![image-20250425163300680](note.assets/image-20250425163300680.png)
+
+![image-20250425164007742](note.assets/image-20250425164007742.png)
+
+## Evaluation of Long-Context LLMs 长上下文大模型的评估标准
+
+### The Lost-in-the-Middle Phenomenon 中间丢失现象
+
+当相关信息在开头和结尾时，准确率高，中间准确率低。
+
+**生成一段流畅的长上下文回复，不意味着模型真正记住了里面的内容，**所以只用困惑度是不够的。
+
+### Long-Context Benchmarks 长上下文的基准测试: NIAH, LongBench
+
+#### NIAH (Needle In A Haystack) 大海捞针
+
+aa在bb干了cc。做询问
+
+随着上下文的变长，询问在文章xx%的位置的内容needle，检索Retrival准确率。
+
+**人为设计的合成基准测试**
+
+#### LongBench
+
+多种任务，发现上下文压缩等技术不如位置编码。
+
+**现实世界的测试**
+
+## Efficient Attention Mechanisms，KV cache 过大的问题
+
+### KV Cache
+
+BS \* layers \* kv-heads \* n\_emd \* length \* 2 \* type，每个token
+
+### StreamingLLM and Attention Sinks
+
+保持恒定内存，Window Attention 的问题，第一个token被移出时，PPL上升
+
+Dense Attention 的问题，在token长度超过预训练长度时，PPL上升 perplex
+
+滑动窗口 + Re-computation 重计算
+
+##### Attention Sink 注意力汇聚 现象
+
+对**第一个token**的注意力会高。
+
+用了softmax，注意力得分和为1，就算有些不需要关注，而自回归模型中，首个token是全局可见的，所以把这些冗余的注意力得分给它。
+
+是因为semantic **语义**，还是position **位置**？是位置。
+
+**保留来一个可训练的注意力汇聚点 / 四个注意力汇聚点。**
+
+（实验得出四个是 sweet point）
+
+ViT 的注意力汇聚点出现在语义信息比较少的区域。
+
+Bert 在句子末尾的分隔符标记
+
+**streamingLLM不等同于长上下文，查询早期的是查不到的，在kv cache中淘汰了。**
+
+(DuoAttention 是来解决这个问题)
+
+### DuoAttention: Retrieval Heads and Streaming Heads
+
+Duo = Two，**同样不能无限长，但是能够减缓**。
+
+retrieval head 和 streaming head
+
+retrieval head，最初的 dense attention
+
+streaming head，只关注 recent token & reduced tokens
+
+每个注意力头都需要训alpha
+
+因为是要用更少的内存，所以，我们对**这个注意力结果做蒸馏distill**，使得和最终的差值最小。
+
+**需要训练多少个alpha？**
+
+layers x heads
+
+**训练材料？**
+
+类似于NIAH，设置一系列 passkey。
+
+**推理的时候怎么办？**
+
+设置阈值threshold，大于dense，小于streaming。
+
+
+
+**decoding**
+
+两种 kv cache 一个是全部，一个是sink point + 最近几个token
+
+计算是正常的多头。
+
+**prefilling**
+
+分块注意力
+
+time complexity $O(L^2) \to O(LK)$ 
+
+memory complexity $O(L) \to O(K)$
+
+希望 streaming head 越多，节省的越多。
+
+实验中，有一半可以作为streaming head。
+
+实际上是**对attention的剪枝、稀疏化**。
+
+
+
+![image-20250430150408915](note.assets/image-20250430150408915.png)
+
+![image-20250430150615629](note.assets/image-20250430150615629.png)
+
+### Quest: Query-Aware Sparsity
+
+1.   Dense Attention
+2.   Query-Agnostic Sparsity 查询无关，要是在前一个token除移除了kv，后面的不会再有这个toekn
+3.   Query-Aware Sparsity，查询感知，前一个移除了，不影响后面还是可以有；基于正在解码的新词元。
+
+因为确实会有某个token对前一个来说不重要，但对下一个很重要的情况，所以我们要全都存下来kv cache，**因此没有节省内存，只是节省移动的内存开销**，只抓取重要的 kv cache，其他的留在内存中。
+
+同样的对 attention page 求和/求平均，只抓取重要的page，其余的留在内存
+
+![image-20250501025912215](note.assets/image-20250501025912215.png)
+
+## Beyond Transformers
+
+### State-Space Models (SSMs): Mamba
+
+注意力机制两大任务，不同之间，单个内部。 **还是不懂#**
+
+Mamba，加基础上引入 Selective State Spafe)
+
+固定的kv cache，不线性增长。
+
+### Hybrid Models: Jamba
+
+混合模型。
+
+# Lec16 ViT
+
+## Basics of Vision Transformer (ViT)
+
+Patch（CNN, patch_size, 3, hidden_dim），Position Encoding，然后就和语言模型一样了
+
+对比CNN，数据量小的时候，CNN好，大的时候，ViT好。
+
+## Efficient ViT & accerleration techniques
+
+超分辨率，有实时应用场景；
+
+高分辨率，对自动驾驶重要。
+
+
+
+高分辨率，对比CNN，ViT 的计算量提升很快，是二次方的提升，分辨率也是二次方，所以就是四次方。
+
+Segment Anything
+
+### Windows attention
+
+注意力机制只在窗口window内发生，固定token大小，计算复杂度的是线性的。
+
+但这样一来，注意力就在局部流通，全局没有了？
+
+**Swin Transformer** 引入 **shift window**，shift operation，让下一层的窗口移动，使得能注意到相邻窗口的内容。
+
+![image-20250527163636223](note.assets/image-20250527163636223.png)
+
+#### Sparse Windows attention
+
+并不是所有的windows都是有用的。
+
+**FlatFormer**，相比于 等窗口组合，用 等大小组合 ，可以更加硬件友好，更好地并行，不多等待。
+
+![image-20250527163650238](note.assets/image-20250527163650238.png)
+
+### Linear attention
+
+替换。
+
+![image-20250527164046256](note.assets/image-20250527164046256.png)
+
+然后发现效果差很多，注意力不突出了。
+
+擅长捕捉全局上下文信息，但局部信息不行。
+
+![image-20250527165047146](note.assets/image-20250527165047146.png)
+
+想到CNN是提取局部信息的好工具，在原先的基础上，加上CNN
+
+![image-20250527205318607](note.assets/image-20250527205318607.png)
+
+结果提升。（分析新的注意力分布与原本的注意力分布特征的区别，得出的解决方案）
+
+### Sparse attention
+
+**SparseViT**，用 L2 激活值来确定窗口的重要程度。
+
+分出不同的重要程度，可以在不同层使用不同的稀疏度。
+
+![image-20250527205729628](note.assets/image-20250527205729628.png)
+
+## Self-supervised learning for ViT
+
+怎么利用unlabeled data
+
+### Contrastive learning
+
+拿同一张图片的不同 crop，去做同一的、拉近的 loss，不同的图片做拉远的 loss。
+
+在小数据集上训的时候，SL，更大的模型可能得不到更好的结果，但是用了对比学习自监督self-SL（CL）会更好
+
+![image-20250527213845273](note.assets/image-20250527213845273.png)
+
+多模态对比学习 **CLIP**
+
+![image-20250527214423449](note.assets/image-20250527214423449.png)
+
+### Masked image modeling
+
+类似与bert的重建遮挡，Mask Language Models, MLM。
+
+![image-20250527215151473](note.assets/image-20250527215151473.png)
+
+Heavy encoder只编码未遮的图片，lite会编码所有。
+
+mask 70~75% sweet spot
+
+作为对比，bert 比率是 15%，图片冗余大。
+
+## ViT & Autoregressive Image Generation
+
+Autoregressive AR。
+
+### Hybrid Autoregressive Transformer (HART)
+
+和新目标是减少迭代次数来加速。
+
+有三种不同的生成方式。
+
+![image-20250527220043178](note.assets/image-20250527220043178.png)
+
+文字生成和图像生成的不同，语言有词汇表，离散的，而图像是连续的。
+
+要用一种AR架构把这两种模态统一起来，就需要一种离散的图像标记，就可以使用同样的loss了。
+
+具体的，加入vector quantized, VQ encoder/decoder和 codebook，一个像素的vector量化是一个标量（量化）。
+
+![image-20250527220442830](note.assets/image-20250527220442830.png)
+
+经验法则：一次性生成更多的标记token。
+
+Visual Autoregressive，**VAR**，引入新的标记生成方法。
+
+先为一张图像生成一个token，和分成2x2...，多个粒度。
+
+![image-20250527221348853](note.assets/image-20250527221348853.png)
+
+他的 attention mask，也有变化（没特别理解
+
+![image-20250527221517972](note.assets/image-20250527221517972.png)
+
+不过效果没那么好。
+
+Hybrid Image Tokenization，**HART**
+
+小的duffusion model，**residual duffusion**残差扩散，来学习离散token和连续token的区别（因为离散token自己学细粒度的很困难）
+
+训练时候采样50% 50%，让两者在 decoder 中处于同一空间
+
+![image-20250527221835339](note.assets/image-20250527221835339.png)
+
+![image-20250527222340548](note.assets/image-20250527222340548.png)
+
+![image-20250527222609940](note.assets/image-20250527222609940.png)
+
+# Lec17 GAN, Video, Point Cloud
+
+## Efficient GAN
+
+显然为了加速推理，压缩 generator
+
+un/conditional GAN
+
+提供条件（class, segmentation map, strokes/随机噪声
+
+GAN 比识别的模型贵
+
+### GAN Compression
+
+重建reconstruction loss，蒸馏（中间特征图）distillation loss，cGAN loss（真实图片和生成图片）
+
+### AnyCost GAN
+
+StyleGAN2只采样最高分辨率，MSG-GAN采样所有分辨率，随机采样
+
+不同通道数量，增加蒸馏损失，可以使得删去通道后的图片样式类似
+
+同样的判别器对于不同的分辨率效果不一定都好
+
+### Differentiable Augmentation for Data-Efficient GANs
+
+需要收集很多数据，贵
+
+图片增强
+
+只对真实图片增强，颜色改变，图片位置shift，部分cutout，会导致生成的图片也长这样，所以不好
+
+（训练D的时候）在生成后都应用，判别器对转换后的图片的判别率高，对原图片 G，效果不好
+
+在训练（G和D的时候）都判别前运用图片转换
+
+## Efficient Video Understanding
+
+temporal modeling 时间建模
+
+### 2D CNN
+
+采样图片，再aggregate，average max
+
+双流网络 spatial + temporal，optical flow
+
+2D CNN + Post-fusion(e.g. LSTM) ，low level 是独立处理的
+
+好处，计算高效，重复利用图片识别2D CNN
+
+坏处，时间信息，光流计算量大，late fusion 无法建模 low level
+
+### 3D CNN
+
+C3D，参数量变大
+
+I3D，用2D CNN来初始化3D CNN，inflation，就重复
+
+好处，时空信息一起 ，各个级别的信息都可以建模
+
+坏处，模型大小，计算量都变大
+
+### TSM (Temporal Shift module)
+
+不用计算量、参数来为时间建模
+
+offline，bi-direction 可以做双向
+
+online，uni-direction 做单向
+
+shift 的比例，不能太多也不能太少
+
+![image-20250601153930427](note.assets/image-20250601153930427.png)
+
+## Efficient Point Cloud Understanding
+
+稀疏，非规整；应用场景算力限制
+
+### PVCNN / SPVCNN
+
+Point-Voxel，Point local，Voxel global（稀疏掉0，让 point 去做高粒度）
+
+3D NAS SPV
+
+### BEVFusion (Bird's-Eye View)
+
+Dense 摄像头，Sparse 雷达，产生BEV + 3D 对象检查
+
+# Lec18 Diffusion Model
+
+## Basics of diffusion model
+
+### Denoising diffusion models
+
+
+
+![image-20250612144431428](note.assets/image-20250612144431428.png)
+
+![image-20250612144612691](note.assets/image-20250612144612691.png)
+
+训练算法
+
+![image-20250612144858452](note.assets/image-20250612144858452.png)
+
+采样算法
+
+![image-20250612145637150](note.assets/image-20250612145637150.png)
+
+### Conditional diffusion models
+
+#### Scalar condition
+
+Class ID，encode，embedding，加到特征图上（或者embedding scale 和 bias更加复杂）
+![image-20250612150234787](note.assets/image-20250612150234787.png)
+
+#### Text condition
+
+##### Cross Attention
+
+图像和文本并不对称，图片 Q，文本 K V
+
+![image-20250612150219729](note.assets/image-20250612150219729.png)
+
+##### Joint Attention
+
+文本和图像对称
+
+![image-20250612150515135](note.assets/image-20250612150515135.png)
+
+##### Single Self Attention
+
+Early fusion
+
+![image-20250612150613830](note.assets/image-20250612150613830.png)
+
+#### Pixel-wise condition
+
+Control Net
+
+![image-20250612150841930](note.assets/image-20250612150841930.png)
+
+![image-20250612151008236](note.assets/image-20250612151008236.png)
+
+关于多样性和质量，增加 c 的分类器，强度
+
+classifier-free guidance
+
+![image-20250612151941365](note.assets/image-20250612151941365.png)
+
+### Latent diffusion models
+
+较少计算量
+
+预训练 VAE，编码到潜空间 diffusion，最后再解码
+
+学习目标是一样的，预测噪音
+
+采样也是类似
+
+分辨率压缩的越多，运行的越快
+
+#### Deep Compression Autoencoder (DC-AE) f64
+
+压缩 64 倍，考虑 Attention 平方，减少的计算有 4k 倍
+
+具体地，通过显式 space-to-channel / channel-to-space，残差自编码，使得更加稳定
+
+因为自编码器要的计算量变大，为了减少计算量，使用分层稀疏调优的方式，减少计算量
+
+还有 Linear Attention，使用小 LLM 作为文本编码器，kernel fusion，flow based PPM 求解器
+
+![image-20250612154044926](note.assets/image-20250612154044926.png)
+
+### Image editing
+
+#### Stroke-Base Editing
+
+通过增加噪声，使得草图和图像接近，然后解出来（具体训练是怎么样的？）
+
+SDEdit
+
+![image-20250612155420892](note.assets/image-20250612155420892.png)
+
+### Model personalization
+
+人物一致性
+
+DreamBooth，通过 finetune，用特别的标识符来代表这个类别
+
+![image-20250612155712527](note.assets/image-20250612155712527.png)
+
+但是，只能对每一个新的类别都需要去finetune，costly
+
+后续也有 training-free 的技术
+
+## Fast sampling techniques
+
+能否增大步幅，减少步骤
+
+### Denoising diffusion implicit models
+
+之前的马尔可夫Markovian 只依赖前一个步骤，增加和 x0 的关系
+
+![image-20250612160144368](note.assets/image-20250612160144368.png)
+
+### Distillation
+
+渐进蒸馏，教师模型一步一步，学生模型从教师模型的两步里面蒸馏学习成一步，然后渐进蒸馏，就可以减少步数
+
+![image-20250612160241743](note.assets/image-20250612160241743.png)
+
+## Acceleration techniques
+
+### Sparsity
+
+编辑只编辑了一些，但需要对所有像素进行运算
+
+SDEdit，只重新计算改变的部分，别的部分复用
+
+Sparse Incremental Generative Engine (SIGE)
+
+![image-20250612160639455](note.assets/image-20250612160639455.png)
+
+Image Inpainting，类似，同时可以实现交互式
+
+### Quantization
+
+SVDQuant
+
+和 LLM 不同，Diffusion Model 是compute-bound，所以 weight-only quantization 没办法加速扩散模型
+
+使用类似 SmoothQuant 的方式，把激活值的 outlier 转移到权重上，然后权重使用 side (low rank) branch 去全精度保持精度损失，经过 SVD，异常值减少W4A4
+
+同时，如果使用 LoRA funetuning，就不需要重新量化，在原本的全精度上追加秩就行了
+
+简单实现，会带来不小的其他开销，kernel fusion 把旁支的 kernel 合在原本的 kernel 中，由于他们共享输入/输出
+
+### Parallelism
+
+DistriFusion，相邻时间戳的输入实际上很相似，可以通过通信旧的激活值，来 overlap 通信与计算
+
+同时，在更高的分辨率下，加速比更高，因为通信开销更大。
+
+![image-20250612161913159](note.assets/image-20250612161913159.png)
+
+# Lec19 Distributed Training 1
+
+## Background and motivation
+
+模型大，对于单 GPU 来说训练时间太长，需要多 GPU 协同训练
+
+## Parallelization methods for distributed trainging
+
+-   Data parallelism
+
+    拆分数据，多个 GPU 上的模型权重是共享的
+
+    partition data, sharing model
+
+-   Pipeline Parallelism
+
+    拆分模型，一份数据。
+
+    按 layer-dimension 划分
+
+-   Tensor Parallelism
+
+    拆分模型，一份数据。
+
+    按 激活值 来划分
+
+-   Sequence Parallelism
+
+    data parallelism 是 batch，sequence parallelism 是 token
+
+## Communication primitives
+
+-   **One-to-One: Send and Recv**
+
+    ![image-20250613165612939](note.assets/image-20250613165612939.png)
+
+-   **One-to-Many and Many-to-One: Scatter and Gather**
+
+    ![image-20250613165825185](note.assets/image-20250613165825185.png)
+
+-   **Many-to-One and One-to-Many: Reduce and Broadcast**
+
+    Reduce 可以看作是 Gather + Reduce 归约操作
+
+    Broadcast 是把张量的全部都分发给所有节点，Scatter 是把不同部分分发给不同节点
+
+    ![image-20250613172900306](note.assets/image-20250613172900306.png)
+
+-   **Many-to-Many: All-Reduce and All-Gather**
+
+    All-Reduce 对所有 workers 做 Reduce
+
+    All-Gather 对所有 workers 做 Gather
+
+## Data Parallelism
+
+### Parameter Server
+
+中心化
+
+1.   Workers pull model from Server
+2.   Workers push & sum to Server gradient
+3.   Server update model using gradient
+4.   Workers replicate / pull the updated model to update local copy
+
+![image-20250613164631712](note.assets/image-20250613164631712.png)
+
+![image-20250613200509743](note.assets/image-20250613200509743.png)
+
+### 去中心化的方法
+
+-   Naive All-Reduce, Sequential
+
+    ![image-20250613200734771](note.assets/image-20250613200734771.png)
+
+-   Better All-Reduce, Ring
+
+    ![image-20250613200800292](note.assets/image-20250613200800292.png)
+
+-   Naive All-Reduce, Parallel Reduce
+
+    ![image-20250613201020226](note.assets/image-20250613201020226.png)
+
+-   ![image-20250613201121123](note.assets/image-20250613201121123.png)
+
+-   Recursive Halving All Reduce (Butterfly All Reduce)
+
+    ![image-20250613201351600](note.assets/image-20250613201351600.png)
+
+## Reducing memory in data parallelism: Zero-1/2/3 and FSDP
+
+![image-20250613202114941](note.assets/image-20250613202114941.png)
+
+## Pipeline parallelism
+
+![image-20250613212924989](note.assets/image-20250613212924989.png)
+
+![image-20250613213026648](note.assets/image-20250613213026648.png)
+
+![image-20250613213054283](note.assets/image-20250613213054283.png)
+
+## Tensor parallelism
+
+从 d_dim 维度切，垂直切，再水平切
+
+Scatter and All-Reduce
+
+broadcast activation
+
+![image-20250613214711506](note.assets/image-20250613214711506.png)
+
+![image-20250613214001072](note.assets/image-20250613214001072.png)
+
+## Sequence parallelism
+
+处理长下文
+
+比如把一本书的不同章节分别做，但是注意力不能互相计算，只是局部的话，会缺失上下文。
+
+### DeepSpeed Ulysses (Solution 1: Re-partition data in Attention layers)
+
+All-to-All 全对全通信开销大，节点之间通信成本高；
+
+最大并行度？会受到模型的多头注意力的头的个数
+
+![image-20250613215341718](note.assets/image-20250613215341718.png)
+
+### Ring Attention(Solution 2: Ring Attention)
+
+交换 KV1 KV2 KV3
+
+并行度不再受 head_num 限制
+
+![image-20250613220222536](note.assets/image-20250613220222536.png)
+
+Longvilla，结合这两种方法，在一个节点中，用 Ulysses，节点之间用 Ring Attention。
+
+（节点内部通信高）
+
+# Lec20 Distributed Training 2
+
+## Hybrid (mixed) parallelism and how to auto-parallelize
+
+### 2D Parallelism
+
+-   Outer: DP
+
+    Inner: PP
+
+-   Outer: PP
+
+    Inner: TP
+
+-   Intra-node: all-to-all repartition
+
+    Inter-node: ring attention
+
+![image-20250614012437333](note.assets/image-20250614012437333.png)
+
+### 3D Parallelism
+
+-   PP + TP + DP
+
+### How to Auto Parallelize
+
+模型太大，不能放单机；PP
+
+模型层太大，不能方单机；TP
+
+### Alpa: A Unified Compiler for Distributed Training
+
+搜索空间大，分层搜索空间 Hierarchical Space。
+
+Inter-op Parallelism
+
+Intra-op Parallelism
+
+Cost，计算成本、通信成本、数据重分布成本
+
+（那还有说法吗？这个设计）
+
+## Understand the bandwidth and latency bottleneck of distributed training
+
+通信很重要。
+
+![image-20250614013903028](note.assets/image-20250614013903028.png)
+
+**估算延迟**
+
+![image-20250614014017059](note.assets/image-20250614014017059.png)
+
+## Gradient compression: overcome the bandwidth bottleneck
+
+### Gradient Prunning
+
+#### Sparse Communication 稀疏通信
+
+结合局部梯度累积的梯度剪枝
+
+-   只 send top-k 梯度 by magnitude
+
+-   保持未 send（没有到 top-k 的）作为 error feedback (residual)
+
+    保留残差，直到累积到阈值 （梯度裁切）
+
+![image-20250614021915785](note.assets/image-20250614021915785.png)
+
+导致性能下降。
+
+-   Momentum 动量机制
+
+    直接累积梯度，会导致优化方向的偏移
+
+    **应该累积速度，而非梯度**
+
+    ![image-20250614014930010](note.assets/image-20250614014930010.png)
+
+    ![image-20250614015158377](note.assets/image-20250614015158377.png)
+
+#### Deep Gradient Compression
+
+warm up training
+
+在训练早期，权重改变大；warm up learning rate
+
+累积梯度会加剧问题；warm up sparsity
+
+指数逐渐增大，保持稳定。
+
+![image-20250614015736570](note.assets/image-20250614015736570.png)
+
+梯度压缩比可以到很高，99.9%，没有1000x？索引开销、bias 偏置没有剪枝，**偏置对残差训练很重要**。
+
+#### PowerSGD: Low-Rank Gradient Compression
+
+**问题：稀疏梯度，在 all-reduce 环节会变得越来密集**
+
+采用固定稀疏模式，粗粒度稀疏。
+
+用低秩分解，来固定稀疏模式，粗粒度稀疏。
+
+### Gradient Quantization
+
+#### 1-Bit SGD
+
+把梯度量化为 1 bit，零阈值，同时保留 delta 值作为残差，缓解误差（累积到阈值，直接加回）。
+
+每一列都增加一个 fp32 的缩放因子
+
+![image-20250614022206527](note.assets/image-20250614022206527.png)
+
+![image-20250614022215979](note.assets/image-20250614022215979.png)
+
+#### Threshold Quantization
+
+设置 tau，大于 tau 为 tau，小于 -tau 为 -tau，之间为 0
+
+需要经验选择 tau 值，同样有累积误差的机制
+
+![image-20250614022458482](note.assets/image-20250614022458482.png)
+
+#### TernGrad
+
+量化 g_i / max(g) 为 0, 1, -1 ，以概率来随机量化，期望一致，不需要累积误差。
+
+![image-20250614022659938](note.assets/image-20250614022659938.png)
+
+## Delayed gradient update: overcome the latency bottleneck
+
+### Bandwidth vs. Latency
+
+带宽容易提升，剪枝量化、硬件提升；
+
+延迟由物理限制，被光速限制
+
+![image-20250614022852163](note.assets/image-20250614022852163.png)
+
+![image-20250614022909511](note.assets/image-20250614022909511.png)
+
+延迟高，同步延迟会变高。
+
+Delayed Gradient Averaging
+
+超过太多步是不行的。
+
+![image-20250614030644450](note.assets/image-20250614030644450.png)
+
+最新的减去当前的来补偿延迟，avg_g 已经有了自己节点的梯度。
+
+![image-20250614032017831](note.assets/image-20250614032017831.png)
+
+# Lec21 On-Device Training and Transfer Learning
+
+## Deep leakage fram gradients, gradient is not safe to share
+
+**Federated learning 联邦学习**
+
+FedAvg algorithm，只传送权重/梯度
+
+![image-20250614132630692](note.assets/image-20250614132630692.png)
+
+-   Membership Inference，指出可以用梯度判断某个记录是否在批次中使用
+-   Property Inference，指出可以用梯度判断有特定属性的样本是否在批次中
+
+**Deep Leakage Attack**
+
+![image-20250614133052908](note.assets/image-20250614133052908.png)
+
+一张图片ok，一个批次多个图片，也是可以的，顺序可能不确定，但是内容可以
+
+**防御策略**
+
+-   增加 Gaussian / laplacian noise，过小没有用，过大破坏模型
+
+-   梯度压缩，剪枝比例到 70% 基本不泄露，保持性能
+
+    只有很少的梯度泄露，复原不出来。
+
+## Memory bottleneck of on-device training
+
+训练的内存占用大，因为批次大、需要存储中间激活值
+
+（checkpoint 来计算换空间）
+
+-   Last 只微调最后一层？准确率下降很多
+-   BN + Last
+-   ![image-20250614134803215](note.assets/image-20250614134803215.png)
+
+代价很大，效果不好
+
+## Tiny tansfer learning (TinyTL)
+
+反向传播更新权重需要激活值，bias偏置不需要激活值
+
+只微调偏置，Bias + Last
+
+![image-20250614140601427](note.assets/image-20250614140601427.png)
+
+引入轻量分支
+
+![image-20250614140753094](note.assets/image-20250614140753094.png)
+
+![image-20250614140826258](note.assets/image-20250614140826258.png)
+
+比剪枝激活值更有效
+
+## Sparse back-propagation (SparseBP)
+
+从生物学出发的方法。
+
+![image-20250614141009296](note.assets/image-20250614141009296.png)
+
+只更新一部分层（深度深的高级特征）
+
+只更新一层中的一部分参数
+
+![image-20250614141140713](note.assets/image-20250614141140713.png)
+
+![image-20250614141154775](note.assets/image-20250614141154775.png)
+
+怎么选择？
+
+起始分辨率高，后面通道数多
+
+![image-20250614141448171](note.assets/image-20250614141448171.png)
+
+contribution analysis 贡献分析
+
+自动求解器，类似敏感度分析
+
+只更新前面的层，acc 甚至变差。
+
+发现重复的起伏，peak是点卷积，curve是深度卷积
+
+更新比例。
+
+用进化算法搜索。
+
+![image-20250614141750320](note.assets/image-20250614141750320.png)
+
+SparseBP 的输出会更长？待研究。
+
+![image-20250614142713545](note.assets/image-20250614142713545.png)
+
+## Quantized training with quantization aware scaling (QAS)
+
+在 int8 下，梯度值过小
+
+![image-20250614143244669](note.assets/image-20250614143244669.png)
+
+修正缩放因子
+
+![image-20250614143847560](note.assets/image-20250614143847560.png)
+
+## PockEngine: system support for sparse back-propagation
+
+![image-20250614144507235](note.assets/image-20250614144507235.png)
+
+![image-20250614144519082](note.assets/image-20250614144519082.png)
+
+多种芯片，编译中，运行轻，训练优化。
+
+# Lec22 Quantum Machine Learning 1
+
+解码量子纠错代码
+
+Noisy Intermediate-Scale Quantum (NISQ)
+
+## Single qubit state and gates
+
+### Single qubit state
+
+basic component => Quantum Bit (Qubit)
+
+state => statevector
+
+Bra-ket notation 狄拉克符号
+
+![image-20250614151944103](note.assets/image-20250614151944103.png)
+
+![image-20250614152018133](note.assets/image-20250614152018133.png)
+
+**Measurement**
+
+![image-20250614155838740](note.assets/image-20250614155838740.png)
+
+**Bloch Sphere** 布洛赫球
+
+![image-20250614161304846](note.assets/image-20250614161304846.png)
+
+![image-20250614161314120](note.assets/image-20250614161314120.png)
+
+用布洛赫球去表示任意量子比特的状态
+
+### Single Qubit Gates
+
+所有 Quantum gates 量子门 都是 **reversible** 可逆的（保证能量是一致的）
+
+最简单的量子门是恒等映射
+
+可逆门可用矩阵、布洛赫球的旋转
+
+#### Pauli Gates
+
+-   X Gate (Not Gate)
+-   Y Gate
+-   Z Gate，0 => 0, 1 => -1, 全局相位 phase，常规无法测量，所以也认为一致
+
+![image-20250614162343499](note.assets/image-20250614162343499.png)
+
+![image-20250614162450413](note.assets/image-20250614162450413.png)
+
+![image-20250614162815210](note.assets/image-20250614162815210.png)
+
+![image-20250614162859531](note.assets/image-20250614162859531.png)
+
+#### Hadamard Gate
+
+创建叠加态
+
+![image-20250614163314899](note.assets/image-20250614163314899.png)
+
+#### Other Gates
+
+-   Phase Gate
+-   S Gate
+-   S dagger Gate
+
+![image-20250614163355276](note.assets/image-20250614163355276.png)
+
+#### U Gate
+
+可以表示所有，通用门
+
+![image-20250614163501587](note.assets/image-20250614163501587.png)
+
+## Multiple-qubit state and gates
+
+### Multiple-qubit state
+
+![image-20250614163625648](note.assets/image-20250614163625648.png)
+
+![image-20250614163657750](note.assets/image-20250614163657750.png)
+
+### Multiple-qubit gates
+
+-   CNOT Gate
+-   ...
+
+![image-20250614164219673](note.assets/image-20250614164219673.png)
+
+![image-20250614164713691](note.assets/image-20250614164713691.png)
+
+## quantum circuit
+
+![image-20250614165152849](note.assets/image-20250614165152849.png)
+
+![image-20250614165242605](note.assets/image-20250614165242605.png)
+
+![image-20250614165405669](note.assets/image-20250614165405669.png)
+
+![image-20250614165644261](note.assets/image-20250614165644261.png)
+
+数据编码/上传代价是现在的主要瓶颈。
+
+## the NISQ era and compilation problems
+
+![image-20250614170857415](note.assets/image-20250614170857415.png)
+
+![image-20250614170705556](note.assets/image-20250614170705556.png)
+
+Single-qubit X error rate => 1.718e-3
+
+CNOT error rate => 6.973e-2
+
+不同量子比特的性能可能不同，误差率。
+
+Sabre Qubit Mapping
+
+看交换后能执行的门，启发式交换
+
+![image-20250614172900090](note.assets/image-20250614172900090.png)
+
+![image-20250614172953543](note.assets/image-20250614172953543.png)
+
+**QuantumNAS**
+
+![image-20250614173036947](note.assets/image-20250614173036947.png)
+
+## the example workflow and compiler on neutral atom quantum computer
+
+![image-20250614173159070](note.assets/image-20250614173159070.png)
+
+最大 k 割去优化编译
+
+![image-20250614173537427](note.assets/image-20250614173537427.png)
+
+# Lec23 Quantum Machine Learning 2
+
+[Lec23-Quantum-ML-II.pdf](https://www.dropbox.com/scl/fi/wxpnpwkrl6pw7lb4n4vrg/Lec23-Quantum-ML-II.pdf?rlkey=21msd9zdilhry5pydlkvbn7n4&e=1&st=aoyc9pzv&dl=0)
+
+>   TBD.
+
+
+
+![image-20250614174243356](note.assets/image-20250614174243356.png)
+
+## Parameterized Quantum Circuit (PQC)
+
+![image-20250614174538876](note.assets/image-20250614174538876.png)
+
+![image-20250614175013836](note.assets/image-20250614175013836.png)
+
+硬件效率
+
+## PQC Training
+
+
+
+## Quantum Classifiers
+
+
+
+## Noise Aware On-Chip Training (QOC) of PQC
+
+
+
+## TorchQuantum Library for QML
+
+
+
+## Robust Quantum Architecture Search
 

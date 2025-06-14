@@ -2,6 +2,8 @@
 
 git clone --recursive \<main repo URL\>
 
+[Lecture Notes By Me](note.md)
+
 ## Labs
 
 There will be 5 labs over the course of the semester.
